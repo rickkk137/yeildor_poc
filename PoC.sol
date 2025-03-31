@@ -24,14 +24,14 @@ contract BaseTest is Test {
     int24 public maxObservationDeviation;  
   
     function setUp() public virtual {  
-        vm.createSelectFork("OPTIMSIM_RPC");//replace this one with ethereum rpc url  
+        vm.createSelectFork("http://localhost:8545");//replace this one with ethereum rpc url  
         tickSpacing = IUniswapV3Pool(pool).tickSpacing();  
         deal(pool.token0(), address(this), type(uint).max);  
         deal(pool.token1(), address(this), type(uint).max);  
-  
+
         (uint32 index0time, ,,) = pool.observations(0);  
   
-        twap = 300; 
+        twap = 300; // I used a depolyed pool which observation zero's timestamp is March 3, 2025 3:21:47 AM and I should set twap longer than this date  
         positionWidth = uint24(4 * tickSpacing);  
         (, int24 tick,,,,,) = IUniswapV3Pool(pool).slot0();  
         _setMainTicks(tick);  
@@ -41,7 +41,7 @@ contract BaseTest is Test {
     }  
   
     function testIncreaseObs() public {  
-            pool.mint(address(this), tickLower, tickUpper, 10000000e18, "test");  
+            console.log("current_timestamp:", block.timestamp);
             IERC20(pool.token0()).approve(address(swapRouter), type(uint).max);  
             IERC20(pool.token1()).approve(address(swapRouter), type(uint).max);  
   
@@ -51,13 +51,16 @@ contract BaseTest is Test {
             swapParams.path = abi.encodePacked(pool.token0(), uint24(100), pool.token1());  
 
             (uint32 nextTimestamp, int56 nextCumulativeTick,,) = IUniswapV3Pool(pool).observations(0);  
-            console2.log("nextTimestamp:", nextTimestamp);
-            console2.log("nextCumulativeTick:", nextCumulativeTick);
+            console2.log("observation0_timestamp:", nextTimestamp);
             pool.increaseObservationCardinalityNext(5);   
-            
+            (, , uint16 currentIndex2,,,,) = IUniswapV3Pool(pool).slot0(); 
             vm.warp(block.timestamp + 100);  
+            assertEq(currentIndex2, 0);
   
-            IMainnetRouter(swapRouter).exactInput(swapParams); //increase current index  
+            IMainnetRouter(swapRouter).exactInput(swapParams); //increase current index
+            (, , uint16 currentIndex3,,,,) = IUniswapV3Pool(pool).slot0(); 
+            vm.warp(block.timestamp + 100);  
+            assertEq(currentIndex2, 0);
   
              (, int24 tick, uint16 currentIndex, uint16 observationCardinality,uint16 observationCardinalityNext,,) = IUniswapV3Pool(pool).slot0();  
             assertEq(observationCardinality, 5);  
@@ -98,7 +101,7 @@ contract BaseTest is Test {
         for (uint16 i = 1; i <= observationCardinality; i++) {  
               
             uint256 index = (observationCardinality + currentIndex - i) % observationCardinality;  
-  
+            console2.log("observationCardinality:", observationCardinality);
               
             (uint32 timestamp, int56 tickCumulative,,) = IUniswapV3Pool(pool).observations(index);  
             if (timestamp == 0) {  
