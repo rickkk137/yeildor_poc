@@ -24,14 +24,14 @@ contract BaseTest is Test {
     int24 public maxObservationDeviation;  
   
     function setUp() public virtual {  
-        vm.createSelectFork("http://localhost:8545");//replace this one with ethereum rpc url  
+        vm.createSelectFork("OPTMISIM_RPC_URL");//replace this one with optimsim rpc url  
         tickSpacing = IUniswapV3Pool(pool).tickSpacing();  
         deal(pool.token0(), address(this), type(uint).max);  
         deal(pool.token1(), address(this), type(uint).max);  
 
         (uint32 index0time, ,,) = pool.observations(0);  
   
-        twap = 300; // I used a depolyed pool which observation zero's timestamp is March 3, 2025 3:21:47 AM and I should set twap longer than this date  
+        twap = 300; 
         positionWidth = uint24(4 * tickSpacing);  
         (, int24 tick,,,,,) = IUniswapV3Pool(pool).slot0();  
         _setMainTicks(tick);  
