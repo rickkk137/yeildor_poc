@@ -1,3 +1,128 @@
+```solidity
+    function test_receivedMsgValueCanBeDiffer() public {
+        // Start recording logs
+        vm.recordLogs();
+
+        // Setup: Give Alice enough tokens and ETH
+        vm.deal(address(governorA), 100 ether);
+        stakeAndGetXSumr(alice, governorA.quorum(block.timestamp - 1), true);
+
+        vm.prank(alice);
+        axSumr.delegate(alice);
+        advanceTimeAndBlock();
+
+        // Create cross-chain proposal
+        (
+            address[] memory srcTargets,
+            uint256[] memory srcValues,
+            bytes[] memory srcCalldatas,
+            string memory srcDescription,
+            uint256 dstProposalId,
+            address[] memory dstTargets,
+            uint256[] memory dstValues,
+            bytes[] memory dstCalldatas,
+            bytes32 dstDescriptionHash
+        ) = _createCrossChainProposalWithNativeToken(bEid, governorA);
+
+        // Submit proposal on chain A
+        vm.prank(alice);
+        uint256 proposalIdA = governorA.propose(
+            srcTargets,
+            srcValues,
+            srcCalldatas,
+            srcDescription
+        );
+
+        // Vote and queue on chain A
+        advanceTimeForVotingDelay();
+        vm.prank(alice);
+        governorA.castVote(proposalIdA, 1);
+        advanceTimeForVotingPeriod();
+
+        governorA.queue(
+            srcTargets,
+            srcValues,
+            srcCalldatas,
+            hashDescription(srcDescription)
+        );
+
+        // Execute on chain A which sends to chain B
+        advanceTimeForTimelockMinDelay();
+
+        vm.expectEmit(true, true, true, true);
+        emit ISummerGovernorV2.ProposalSentCrossChain(dstProposalId, bEid);
+        vm.prank(alice);
+        governorA.execute(
+            srcTargets,
+            srcValues,
+            srcCalldatas,
+            hashDescription(srcDescription)
+        );
+
+        useNetworkB();
+
+        // Verify cross-chain message
+        (
+            bytes32[] memory guids,
+            bytes[] memory packetsBytes,
+            bytes[] memory options
+        ) = verifyPacketsWithoutExecute(
+                bEid,
+                addressToBytes32(address(governorB)),
+                0
+            );
+        this.executePackets{value: 100}(
+            bEid,
+            addressToBytes32(address(governorB)),
+            guids,
+            packetsBytes,
+            options,
+            address(0)
+        );
+
+        //Get the logs and verify events
+        (
+            bool foundReceivedEvent,
+            bool foundQueuedEvent,
+            uint256 queuedEta
+        ) = _verifyProposalEvents(dstProposalId);
+
+        assertTrue(
+            foundReceivedEvent,
+            "Missing ProposalReceivedCrossChain event"
+        );
+        assertTrue(foundQueuedEvent, "Missing ProposalQueued event");
+
+        // Verify proposal is queued on chain B
+        bytes32 salt = bytes20(address(governorB)) ^ dstDescriptionHash;
+        bytes32 timelockId = timelockB.hashOperationBatch(
+            dstTargets,
+            dstValues,
+            dstCalldatas,
+            0, // predecessor
+            salt
+        );
+        assertTrue(
+            timelockB.isOperationPending(timelockId),
+            "Operation should be pending in timelock"
+        );
+
+        // Execute on chain B after timelock delay
+        vm.warp(queuedEta + 1);
+        vm.deal(address(timelockB), 100);
+        deal(address(bSummerToken), address(timelockB), 1000);
+        assertEq(address(timelockB).balance, 100);
+        timelockB.executeBatch(
+            dstTargets,
+            dstValues,
+            dstCalldatas,
+            0, // predecessor
+            salt
+        );
+
+        assertEq(address(timelockB).balance, 0);
+    }
+```
 ```diff
 diff --git a/summer-earn-protocol/packages/gov-contracts/test/governorV2/SummerGovernorV2.crosschain.t.sol b/summer-earn-protocol/packages/gov-contracts/test/governorV2/SummerGovernorV2.crosschain.t.sol
 index c5ab707..338dcf4 100644
